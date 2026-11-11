@@ -1,0 +1,532 @@
+openapi: 3.0.3
+info:
+  title: DashFuel Tank Analytics API
+  version: 1.0.0
+  description: Gas station storage tanks and their volume readings. All timestamps
+    are UTC (ISO 8601). Soft-deleted tanks return 404 on every route under them.
+paths:
+  /api/v1/tanks/:
+    get:
+      operationId: list_tanks
+      description: Active (not soft-deleted) tanks, ordered by tank_id.
+      summary: List tanks
+      parameters:
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          default: 100
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      tags:
+      - Tanks
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTankList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: 'Validation error: field names mapped to lists of messages,
+            e.g. {"volume": ["Ensure this value is greater than or equal to 0."]}.
+            Unknown fields are rejected. For a batch, item errors are keyed by the
+            failing item''s 0-based position ({"1": {...}}) and batch-wide errors
+            are under "non_field_errors".'
+    post:
+      operationId: create_tank
+      description: /tanks/
+      summary: Create a tank
+      tags:
+      - Tanks
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TankCreateRequest'
+        required: true
+      security:
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TankResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: 'Validation error: field names mapped to lists of messages,
+            e.g. {"volume": ["Ensure this value is greater than or equal to 0."]}.
+            Unknown fields are rejected. For a batch, item errors are keyed by the
+            failing item''s 0-based position ({"1": {...}}) and batch-wide errors
+            are under "non_field_errors".'
+  /api/v1/tanks/{tank_id}/:
+    get:
+      operationId: get_tank
+      description: /tanks/{tank_id}/
+      summary: Get a tank
+      parameters:
+      - in: path
+        name: tank_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Tanks
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TankResponse'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Tank not found, or soft-deleted.
+    patch:
+      operationId: update_tank
+      description: 'Partial update: send only the fields to change.'
+      summary: Update a tank
+      parameters:
+      - in: path
+        name: tank_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Tanks
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTankUpdateRequest'
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TankResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: 'Validation error: field names mapped to lists of messages,
+            e.g. {"volume": ["Ensure this value is greater than or equal to 0."]}.
+            Unknown fields are rejected. For a batch, item errors are keyed by the
+            failing item''s 0-based position ({"1": {...}}) and batch-wide errors
+            are under "non_field_errors".'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Tank not found, or soft-deleted.
+    delete:
+      operationId: delete_tank
+      description: Sets deleted_at. The tank's readings are kept, but every route
+        under the tank returns 404 afterwards.
+      summary: Delete a tank (soft delete)
+      parameters:
+      - in: path
+        name: tank_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Tanks
+      security:
+      - {}
+      responses:
+        '204':
+          description: No response body
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Tank not found, or soft-deleted.
+  /api/v1/tanks/{tank_id}/volumes/:
+    get:
+      operationId: list_tank_volumes
+      description: Ordered by created_at, oldest first. Optional start (inclusive)
+        and end (exclusive) filter by created_at.
+      summary: List a tank's readings
+      parameters:
+      - in: query
+        name: end
+        schema:
+          type: string
+          format: date-time
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          default: 100
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - in: query
+        name: start
+        schema:
+          type: string
+          format: date-time
+      - in: path
+        name: tank_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Tank volumes
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTankVolumeList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: 'Validation error: field names mapped to lists of messages,
+            e.g. {"volume": ["Ensure this value is greater than or equal to 0."]}.
+            Unknown fields are rejected. For a batch, item errors are keyed by the
+            failing item''s 0-based position ({"1": {...}}) and batch-wide errors
+            are under "non_field_errors".'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Tank not found, or soft-deleted.
+    post:
+      operationId: create_tank_volumes
+      description: A JSON array of 1 to 1000 readings, saved all or nothing. created_at
+        is optional (defaults to now), but at most one reading per batch may omit
+        it, and timestamps must be unique within the batch and for the tank. Timestamps
+        without an offset are treated as UTC.
+      summary: Add readings (batch)
+      parameters:
+      - in: path
+        name: tank_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Tank volumes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/components/schemas/TankVolumeCreateRequest'
+        required: true
+      security:
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TankVolumeResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: 'Validation error: field names mapped to lists of messages,
+            e.g. {"volume": ["Ensure this value is greater than or equal to 0."]}.
+            Unknown fields are rejected. For a batch, item errors are keyed by the
+            failing item''s 0-based position ({"1": {...}}) and batch-wide errors
+            are under "non_field_errors".'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Tank not found, or soft-deleted.
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: A reading already exists for this tank at one or more of the
+            given created_at timestamps. Nothing in the batch was saved.
+  /api/v1/tanks/{tank_id}/volumes/{tank_volume_id}/:
+    patch:
+      operationId: update_tank_volume
+      description: Only volume can change. To fix a wrong created_at, delete the reading
+        and create it again.
+      summary: Correct a reading's volume
+      parameters:
+      - in: path
+        name: tank_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: tank_volume_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Tank volumes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTankVolumeUpdateRequest'
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TankVolumeResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: 'Validation error: field names mapped to lists of messages,
+            e.g. {"volume": ["Ensure this value is greater than or equal to 0."]}.
+            Unknown fields are rejected. For a batch, item errors are keyed by the
+            failing item''s 0-based position ({"1": {...}}) and batch-wide errors
+            are under "non_field_errors".'
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Tank not found (or soft-deleted), or the reading doesn't exist
+            under this tank.
+    delete:
+      operationId: delete_tank_volume
+      description: /tanks/{tank_id}/volumes/{tank_volume_id}/
+      summary: Delete a reading
+      parameters:
+      - in: path
+        name: tank_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: tank_volume_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - Tank volumes
+      security:
+      - {}
+      responses:
+        '204':
+          description: No response body
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Tank not found (or soft-deleted), or the reading doesn't exist
+            under this tank.
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      description: Body of every 404 and 409 response.
+      properties:
+        detail:
+          type: string
+      required:
+      - detail
+    PaginatedTankList:
+      type: object
+      properties:
+        count:
+          type: integer
+          description: Total matching items across all pages.
+        limit:
+          type: integer
+        offset:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TankResponse'
+      required:
+      - count
+      - limit
+      - offset
+      - results
+    PaginatedTankVolumeList:
+      type: object
+      properties:
+        count:
+          type: integer
+          description: Total matching items across all pages.
+        limit:
+          type: integer
+        offset:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TankVolumeResponse'
+      required:
+      - count
+      - limit
+      - offset
+      - results
+    PatchedTankUpdateRequest:
+      type: object
+      description: 'PATCH /tanks/{tank_id}/: every field optional, but none may be
+        null or blank.'
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        location:
+          type: string
+          maxLength: 255
+        timezone:
+          type: string
+          maxLength: 64
+    PatchedTankVolumeUpdateRequest:
+      type: object
+      description: 'PATCH /tanks/{tank_id}/volumes/{tank_volume_id}/: corrects volume
+        only.'
+      properties:
+        volume:
+          type: number
+          format: double
+          maximum: 10000000000
+          minimum: 0
+          exclusiveMaximum: true
+    TankCreateRequest:
+      type: object
+      description: 'POST /tanks/: every field required.'
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        location:
+          type: string
+          maxLength: 255
+        timezone:
+          type: string
+          maxLength: 64
+      required:
+      - location
+      - name
+      - timezone
+    TankResponse:
+      type: object
+      properties:
+        tank_id:
+          type: integer
+        name:
+          type: string
+        location:
+          type: string
+        timezone:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - location
+      - name
+      - tank_id
+      - timezone
+      - updated_at
+    TankVolumeCreateRequest:
+      type: object
+      description: One item of POST /tanks/{tank_id}/volumes/. Build the whole batch
+        with build_batch().
+      properties:
+        volume:
+          type: number
+          format: double
+          maximum: 10000000000
+          minimum: 0
+          exclusiveMaximum: true
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - volume
+    TankVolumeResponse:
+      type: object
+      properties:
+        tank_volume_id:
+          type: integer
+        tank_id:
+          type: integer
+        volume:
+          type: number
+          format: double
+          maximum: 10000000000
+          minimum: -10000000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - tank_id
+      - tank_volume_id
+      - updated_at
+      - volume

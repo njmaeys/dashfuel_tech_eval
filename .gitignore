@@ -1,2 +1,15 @@
 # Don't push DashFuels PDF up to Github
 project_spec.pdf
+
+# Virtual env
+.venv
+
+# Python
+__pycache__/
+*.pyc
+
+# Local database (rebuilt with `python manage.py migrate`)
+db.sqlite3
+
+# Tooling
+.pytest_cache/
