@@ -11,6 +11,7 @@ import pytest
 from tanks.domain import TankUpdate
 from tanks.exceptions import TankNotFound
 from tanks.repositories.tank_repository import BaseTankRepository
+from tanks.services.daily_sales_service import BaseDailySalesService
 from tanks.services.tank_service import TankService
 
 
@@ -20,8 +21,17 @@ def mock_tank_repository() -> Mock:
 
 
 @pytest.fixture
-def tank_service(mock_tank_repository) -> TankService:
-    return TankService(repository=mock_tank_repository)
+def mock_daily_sales_service() -> Mock:
+    return Mock(spec=BaseDailySalesService)
+
+
+@pytest.fixture
+def tank_service(mock_tank_repository, mock_daily_sales_service, recording_atomic) -> TankService:
+    return TankService(
+        repository=mock_tank_repository,
+        daily_sales_service=mock_daily_sales_service,
+        atomic=recording_atomic,
+    )
 
 
 class TestGetTank:
@@ -53,6 +63,45 @@ class TestUpdateTank:
         with pytest.raises(TankNotFound):
             tank_service.update_tank(999, TankUpdate(name="Renamed"))
         mock_tank_repository.update.assert_not_called()
+
+    def test_timezone_change_rebuilds_daily_sales_inside_transaction(
+        self,
+        tank_service,
+        mock_tank_repository,
+        mock_daily_sales_service,
+        recording_atomic,
+        unsaved_tank,
+    ):
+        mock_tank_repository.get_by_id.return_value = unsaved_tank  # timezone "UTC"
+        mock_tank_repository.update.return_value = unsaved_tank
+        mock_daily_sales_service.recalculate_all_days.side_effect = (
+            lambda tank: assert_inside_transaction(recording_atomic)
+        )
+
+        tank_service.update_tank(1, TankUpdate(timezone="America/Chicago"))
+
+        mock_daily_sales_service.recalculate_all_days.assert_called_once_with(unsaved_tank)
+
+    @pytest.mark.parametrize(
+        "tank_update",
+        [
+            pytest.param(TankUpdate(name="Renamed"), id="other field"),
+            pytest.param(TankUpdate(timezone="UTC"), id="same timezone"),
+        ],
+    )
+    def test_no_rebuild_when_timezone_unchanged(
+        self, tank_service, mock_tank_repository, mock_daily_sales_service, unsaved_tank, tank_update
+    ):
+        mock_tank_repository.get_by_id.return_value = unsaved_tank  # timezone "UTC"
+        mock_tank_repository.update.return_value = unsaved_tank
+
+        tank_service.update_tank(1, tank_update)
+
+        mock_daily_sales_service.recalculate_all_days.assert_not_called()
+
+
+def assert_inside_transaction(recording_atomic) -> None:
+    assert recording_atomic.active, "expected to run inside the service's transaction"
 
 
 class TestDeleteTank:

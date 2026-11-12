@@ -87,6 +87,38 @@ class TestListForTank:
         assert page.count == 5
 
 
+class TestListInRange:
+    def test_start_inclusive_end_exclusive_ordered_and_scoped_to_tank(
+        self, tank_volume_repository, tank_factory, tank_volume_factory
+    ):
+        tank = tank_factory(name="Mine")
+        other_tank = tank_factory(name="Other")
+        tank_volume_factory(tank, created_at=JAN_2)
+        on_end = tank_volume_factory(tank, created_at=JAN_4)
+        later = tank_volume_factory(tank, created_at=datetime(2023, 1, 3, 12, tzinfo=UTC))
+        on_start = tank_volume_factory(tank, created_at=JAN_3)
+        tank_volume_factory(other_tank, created_at=JAN_3)
+
+        tank_volumes = tank_volume_repository.list_in_range(tank.id, start_at=JAN_3, end_at=JAN_4)
+
+        assert tank_volumes == [on_start, later]
+        assert on_end not in tank_volumes
+
+
+class TestDateRangeUtc:
+    def test_returns_first_and_last_created_at(
+        self, tank_volume_repository, tank, tank_volume_factory
+    ):
+        tank_volume_factory(tank, created_at=JAN_3)
+        tank_volume_factory(tank, created_at=JAN_2)
+        tank_volume_factory(tank, created_at=JAN_4)
+
+        assert tank_volume_repository.date_range_utc(tank.id) == (JAN_2, JAN_4)
+
+    def test_returns_none_without_readings(self, tank_volume_repository, tank):
+        assert tank_volume_repository.date_range_utc(tank.id) is None
+
+
 class TestExistingCreatedAts:
     def test_returns_only_timestamps_already_saved_for_tank(
         self, tank_volume_repository, tank_factory, tank_volume_factory

@@ -48,6 +48,24 @@ class TestListActive:
         assert (page.count, page.limit, page.offset) == (5, 2, 1)
 
 
+class TestListActiveByIds:
+    def test_none_returns_all_active_tanks_in_order(self, tank_repository, tank_factory):
+        first_tank = tank_factory(name="First")
+        tank_factory(name="Deleted", deleted_at=timezone.now())
+        second_tank = tank_factory(name="Second")
+
+        assert tank_repository.list_active_by_ids(None) == [first_tank, second_tank]
+
+    def test_filters_by_ids_and_skips_unknown_and_deleted(self, tank_repository, tank_factory):
+        wanted_tank = tank_factory(name="Wanted")
+        deleted_tank = tank_factory(name="Deleted", deleted_at=timezone.now())
+        tank_factory(name="Not requested")
+
+        tanks = tank_repository.list_active_by_ids([wanted_tank.id, deleted_tank.id, 999])
+
+        assert tanks == [wanted_tank]
+
+
 class TestCreate:
     def test_persists_tank(self, tank_repository):
         tank = tank_repository.create(

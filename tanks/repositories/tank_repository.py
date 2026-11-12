@@ -21,6 +21,10 @@ class BaseTankRepository(ABC):
         """Return one page of active tanks, ordered by tank_id."""
 
     @abstractmethod
+    def list_active_by_ids(self, tank_ids: list[int] | None) -> list[Tank]:
+        """Active tanks with these ids (unknown ids are skipped), or all if None. By tank_id."""
+
+    @abstractmethod
     def create(self, tank_create: TankCreate) -> Tank: ...
 
     @abstractmethod
@@ -43,6 +47,12 @@ class TankRepository(BaseTankRepository):
             limit=limit,
             offset=offset,
         )
+
+    def list_active_by_ids(self, tank_ids: list[int] | None) -> list[Tank]:
+        queryset = Tank.objects.filter(deleted_at__isnull=True).order_by("id")
+        if tank_ids is not None:
+            queryset = queryset.filter(id__in=tank_ids)
+        return list(queryset)
 
     def create(self, tank_create: TankCreate) -> Tank:
         return Tank.objects.create(**asdict(tank_create))

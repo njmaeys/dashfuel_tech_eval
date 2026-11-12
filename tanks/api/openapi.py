@@ -13,6 +13,7 @@ from tanks.api.serializers.tanks import TankResponseSerializer
 
 TANKS_TAG = "Tanks"
 TANK_VOLUMES_TAG = "Tank volumes"
+DAILY_SALES_TAG = "Daily sales"
 
 
 class ErrorResponseSerializer(serializers.Serializer):

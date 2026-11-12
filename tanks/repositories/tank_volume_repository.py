@@ -3,6 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
+from django.db.models import Max, Min
 
 from tanks.domain import Page, TankVolumeCreate
 from tanks.exceptions import DuplicateTankVolume
@@ -26,6 +27,16 @@ class BaseTankVolumeRepository(ABC):
         end: datetime | None,
     ) -> Page[TankVolume]:
         """One page of readings ordered by created_at. start is inclusive, end is exclusive."""
+
+    @abstractmethod
+    def list_in_range(
+        self, tank_id: int, start_at: datetime, end_at: datetime
+    ) -> list[TankVolume]:
+        """All of the tank's readings with start_at <= created_at < end_at, oldest first."""
+
+    @abstractmethod
+    def date_range_utc(self, tank_id: int) -> tuple[datetime, datetime] | None:
+        """created_at of the tank's first and last reading, or None if it has none."""
 
     @abstractmethod
     def existing_created_ats(self, tank_id: int, created_ats: list[datetime]) -> list[datetime]:
@@ -67,6 +78,23 @@ class TankVolumeRepository(BaseTankVolumeRepository):
             limit=limit,
             offset=offset,
         )
+
+    def list_in_range(
+        self, tank_id: int, start_at: datetime, end_at: datetime
+    ) -> list[TankVolume]:
+        return list(
+            TankVolume.objects.filter(
+                tank_id=tank_id, created_at__gte=start_at, created_at__lt=end_at
+            ).order_by("created_at")
+        )
+
+    def date_range_utc(self, tank_id: int) -> tuple[datetime, datetime] | None:
+        bounds = TankVolume.objects.filter(tank_id=tank_id).aggregate(
+            first_created_at=Min("created_at"), last_created_at=Max("created_at")
+        )
+        if bounds["first_created_at"] is None:
+            return None
+        return bounds["first_created_at"], bounds["last_created_at"]
 
     def existing_created_ats(self, tank_id: int, created_ats: list[datetime]) -> list[datetime]:
         return list(

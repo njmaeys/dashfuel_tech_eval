@@ -374,8 +374,173 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
           description: Tank not found (or soft-deleted), or the reading doesn't exist
             under this tank.
+  /api/v1/tanks/sales/daily/:
+    get:
+      operationId: list_daily_sales
+      description: One row per active tank per date in the range (inclusive, at most
+        30 days). Dates use the tank's timezone. A date without readings has 0 sales
+        and still counts in the running average, which is (sum of daily totals from
+        Monday through the date) / (days from Monday through the date).
+      summary: Daily total sales and weekly running average
+      parameters:
+      - in: query
+        name: end_date
+        schema:
+          type: string
+          format: date
+        description: Last date to return (inclusive). At most 30 days.
+        required: true
+      - in: query
+        name: start_date
+        schema:
+          type: string
+          format: date
+        description: First date to return (inclusive).
+        required: true
+      - in: query
+        name: tank_id
+        schema:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+        description: Repeat to filter by several tanks. Unknown or deleted tank ids
+          are left out of the results. Omit for all tanks.
+      tags:
+      - Daily sales
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DailySalesResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: 'Validation error: field names mapped to lists of messages,
+            e.g. {"volume": ["Ensure this value is greater than or equal to 0."]}.
+            Unknown fields are rejected. For a batch, item errors are keyed by the
+            failing item''s 0-based position ({"1": {...}}) and batch-wide errors
+            are under "non_field_errors".'
+  /api/v1/tanks/sales/daily/recalculate/:
+    post:
+      operationId: recalculate_daily_sales
+      description: 'Recomputes every date in the range (inclusive, at most 366 days)
+        from the readings. Not needed in normal use: adding readings already recalculates
+        the affected days.'
+      summary: Recalculate stored daily totals (backfill / repair)
+      tags:
+      - Daily sales
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DailySalesRecalculateRequest'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecalculationSummaryResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: 'Validation error: field names mapped to lists of messages,
+            e.g. {"volume": ["Ensure this value is greater than or equal to 0."]}.
+            Unknown fields are rejected. For a batch, item errors are keyed by the
+            failing item''s 0-based position ({"1": {...}}) and batch-wide errors
+            are under "non_field_errors".'
 components:
   schemas:
+    DailySalesRecalculateRequest:
+      type: object
+      description: POST /tanks/sales/daily/recalculate/ body.
+      properties:
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+          description: Inclusive. At most 366 days after start_date.
+        tank_ids:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+          description: Omit for all active tanks. Unknown or deleted tank ids are
+            skipped.
+      required:
+      - end_date
+      - start_date
+    DailySalesResponse:
+      type: object
+      properties:
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DailySalesRowResponse'
+      required:
+      - end_date
+      - results
+      - start_date
+    DailySalesRowResponse:
+      type: object
+      properties:
+        tank_id:
+          type: integer
+        date:
+          type: string
+          format: date
+        day_of_week:
+          type: string
+          description: e.g. "Monday".
+        daily_total_sales:
+          type: number
+          format: double
+          maximum: 10000000000
+          minimum: -10000000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+        weekly_running_average:
+          type: number
+          format: double
+          maximum: 10000000000
+          minimum: -10000000000
+          exclusiveMaximum: true
+          exclusiveMinimum: true
+          description: Sum of daily totals from Monday through this date / days from
+            Monday through this date.
+        fuel_load_received:
+          type: boolean
+          description: True if any reading went up this day (a delivery), so some
+            sales may be hidden.
+      required:
+      - daily_total_sales
+      - date
+      - day_of_week
+      - fuel_load_received
+      - tank_id
+      - weekly_running_average
     ErrorResponse:
       type: object
       description: Body of every 404 and 409 response.
@@ -447,6 +612,28 @@ components:
           maximum: 10000000000
           minimum: 0
           exclusiveMaximum: true
+    RecalculationSummaryResponse:
+      type: object
+      properties:
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        tank_ids:
+          type: array
+          items:
+            type: integer
+          description: Tanks actually recalculated.
+        days_with_sales_rows:
+          type: integer
+          description: Days that have readings, and so now have a stored daily total.
+      required:
+      - days_with_sales_rows
+      - end_date
+      - start_date
+      - tank_ids
     TankCreateRequest:
       type: object
       description: 'POST /tanks/: every field required.'

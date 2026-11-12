@@ -12,12 +12,40 @@ from decimal import Decimal
 import pytest
 from rest_framework.test import APIClient
 
-from tanks.models import Tank, TankVolume
+from tanks.models import Tank, TankDailySales, TankVolume
 
 
 @pytest.fixture
 def api_client() -> APIClient:
     return APIClient()
+
+
+class RecordingAtomic:
+    """Stands in for django.db.transaction.atomic in service tests (no DB).
+
+    Services call self._atomic() and use the result as a context manager. `active` lets a test
+    assert that work happened inside the transaction.
+    """
+
+    def __init__(self):
+        self.active = False
+        self.times_entered = 0
+
+    def __call__(self) -> "RecordingAtomic":
+        return self
+
+    def __enter__(self) -> None:
+        self.active = True
+        self.times_entered += 1
+
+    def __exit__(self, *exc_info) -> bool:
+        self.active = False
+        return False  # never swallow exceptions
+
+
+@pytest.fixture
+def recording_atomic() -> RecordingAtomic:
+    return RecordingAtomic()
 
 
 # --- Saved to the DB (tests using these need the db) ----------------------------------------
@@ -60,6 +88,23 @@ def tank_volume_factory(db):
         return TankVolume.objects.create(**fields)
 
     return make_tank_volume
+
+
+@pytest.fixture
+def tank_daily_sales_factory(db):
+    """Create and save a TankDailySales row for the given tank and date."""
+
+    def make_tank_daily_sales(tank: Tank, date, **overrides) -> TankDailySales:
+        fields = {
+            "tank": tank,
+            "date": date,
+            "daily_total_sales": Decimal("0.00"),
+            "fuel_load_received": False,
+        }
+        fields.update(overrides)
+        return TankDailySales.objects.create(**fields)
+
+    return make_tank_daily_sales
 
 
 # --- Never saved (for tests that must not touch the DB) -------------------------------------

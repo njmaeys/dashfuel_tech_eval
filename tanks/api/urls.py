@@ -1,6 +1,8 @@
 from django.urls import path
 
 from tanks.api.views import (
+    DailySalesCollectionView,
+    DailySalesRecalculateView,
     TankCollectionView,
     TankItemView,
     TankVolumeCollectionView,
@@ -9,6 +11,13 @@ from tanks.api.views import (
 
 urlpatterns = [
     path("tanks/", TankCollectionView.as_view(), name="tank-collection"),
+    # "sales" can't match <int:tank_id>, so these never collide with the tank routes.
+    path("tanks/sales/daily/", DailySalesCollectionView.as_view(), name="daily-sales-collection"),
+    path(
+        "tanks/sales/daily/recalculate/",
+        DailySalesRecalculateView.as_view(),
+        name="daily-sales-recalculate",
+    ),
     path("tanks/<int:tank_id>/", TankItemView.as_view(), name="tank-item"),
     path(
         "tanks/<int:tank_id>/volumes/",

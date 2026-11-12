@@ -45,3 +45,34 @@ class TankVolume(models.Model):
 
     def __str__(self) -> str:
         return f"{self.tank_id} @ {self.created_at:%Y-%m-%d %H:%M}: {self.volume}"
+
+
+class TankDailySales(models.Model):
+    """Derived data: one row per tank per local day that has readings.
+
+    Written only by DailySalesService.recalculate_days whenever readings change. A missing row
+    means the day has no readings (0 sales), never "not calculated yet". The weekly running
+    average isn't stored; it's computed on read from these rows.
+    """
+
+    tank = models.ForeignKey(Tank, on_delete=models.PROTECT, related_name="daily_sales")
+    # The tank's local date (Tank.timezone), not the UTC date.
+    date = models.DateField()
+    daily_total_sales = models.DecimalField(
+        max_digits=12, decimal_places=2, validators=[MinValueValidator(0)]
+    )
+    # True if any counted pair of consecutive readings went up (e.g. a delivery).
+    fuel_load_received = models.BooleanField(default=False)
+    # Rows are replaced on recalculation, so this is the only meaningful timestamp.
+    calculated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "tank_daily_sales"
+        ordering = ["tank_id", "date"]
+        verbose_name_plural = "tank daily sales"
+        constraints = [
+            models.UniqueConstraint(fields=["tank", "date"], name="uniq_tank_daily_sales_tank_date")
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.tank_id} on {self.date}: {self.daily_total_sales}"

@@ -16,6 +16,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from tanks.api.openapi import (
+    DAILY_SALES_TAG,
     DUPLICATE_TANK_VOLUME,
     PAGINATED_TANK_VOLUMES,
     PAGINATED_TANKS,
@@ -26,6 +27,12 @@ from tanks.api.openapi import (
     VALIDATION_ERROR,
 )
 from tanks.api.pagination import PaginationQuerySerializer, paginated_response_data
+from tanks.api.serializers.daily_sales import (
+    DailySalesQuerySerializer,
+    DailySalesRecalculateRequestSerializer,
+    DailySalesResponseSerializer,
+    RecalculationSummaryResponseSerializer,
+)
 from tanks.api.serializers.tank_volumes import (
     MAX_TANK_VOLUME_BATCH_SIZE,
     TankVolumeCreateRequestSerializer,
@@ -38,7 +45,11 @@ from tanks.api.serializers.tanks import (
     TankResponseSerializer,
     TankUpdateRequestSerializer,
 )
-from tanks.dependencies import get_tank_service, get_tank_volume_service
+from tanks.dependencies import (
+    get_daily_sales_service,
+    get_tank_service,
+    get_tank_volume_service,
+)
 
 
 class TankCollectionView(APIView):
@@ -211,3 +222,61 @@ class TankVolumeItemView(APIView):
             tank_id=tank_id, tank_volume_id=tank_volume_id
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class DailySalesCollectionView(APIView):
+    """/tanks/sales/daily/ (read only: never recalculates or writes)."""
+
+    @extend_schema(
+        operation_id="list_daily_sales",
+        summary="Daily total sales and weekly running average",
+        description=(
+            "One row per active tank per date in the range (inclusive, at most 30 days). Dates "
+            "use the tank's timezone. A date without readings has 0 sales and still counts in "
+            "the running average, which is (sum of daily totals from Monday through the date) / "
+            "(days from Monday through the date)."
+        ),
+        tags=[DAILY_SALES_TAG],
+        parameters=[DailySalesQuerySerializer],
+        responses={200: DailySalesResponseSerializer, 400: VALIDATION_ERROR},
+    )
+    def get(self, request: Request) -> Response:
+        query = DailySalesQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        start_date = query.validated_data["start_date"]
+        end_date = query.validated_data["end_date"]
+        daily_sales_rows = get_daily_sales_service().get_daily_sales(
+            start_date=start_date,
+            end_date=end_date,
+            tank_ids=query.validated_data.get("tank_id"),
+        )
+        return Response(
+            DailySalesResponseSerializer(
+                {"start_date": start_date, "end_date": end_date, "results": daily_sales_rows}
+            ).data
+        )
+
+
+class DailySalesRecalculateView(APIView):
+    """/tanks/sales/daily/recalculate/"""
+
+    @extend_schema(
+        operation_id="recalculate_daily_sales",
+        summary="Recalculate stored daily totals (backfill / repair)",
+        description=(
+            "Recomputes every date in the range (inclusive, at most 366 days) from the readings. "
+            "Not needed in normal use: adding readings already recalculates the affected days."
+        ),
+        tags=[DAILY_SALES_TAG],
+        request=DailySalesRecalculateRequestSerializer,
+        responses={200: RecalculationSummaryResponseSerializer, 400: VALIDATION_ERROR},
+    )
+    def post(self, request: Request) -> Response:
+        body = DailySalesRecalculateRequestSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        recalculation_summary = get_daily_sales_service().recalculate_range(
+            start_date=body.validated_data["start_date"],
+            end_date=body.validated_data["end_date"],
+            tank_ids=body.validated_data.get("tank_ids"),
+        )
+        return Response(RecalculationSummaryResponseSerializer(recalculation_summary).data)
