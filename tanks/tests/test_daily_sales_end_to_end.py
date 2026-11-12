@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from tanks.models import Tank, TankVolume
+from tanks.models import Tank, TankDailySales, TankVolume
 
 pytestmark = pytest.mark.django_db
 
@@ -188,3 +188,125 @@ def test_soft_deleted_and_unknown_tanks_are_left_out(api_client):
 
     assert response.status_code == 200
     assert [row["tank_id"] for row in response.json()["results"]] == [kept_tank_id]
+
+
+# --- Part 3: corrections keep daily sales fresh ---------------------------------------------
+
+
+def load_spec_tank(api_client) -> tuple[int, dict[str, int]]:
+    """Create a tank with the spec readings. Returns tank_id and {created_at: tank_volume_id}."""
+    tank_id = create_tank(api_client)
+    response = api_client.post(f"/api/v1/tanks/{tank_id}/volumes/", SPEC_READINGS, format="json")
+    assert response.status_code == 201
+    return tank_id, {row["created_at"]: row["tank_volume_id"] for row in response.json()}
+
+
+def patch_volume(api_client, tank_id: int, tank_volume_id: int, volume: int) -> None:
+    response = api_client.patch(
+        f"/api/v1/tanks/{tank_id}/volumes/{tank_volume_id}/", {"volume": volume}, format="json"
+    )
+    assert response.status_code == 200, response.json()
+
+
+def delete_reading(api_client, tank_id: int, tank_volume_id: int) -> None:
+    response = api_client.delete(f"/api/v1/tanks/{tank_id}/volumes/{tank_volume_id}/")
+    assert response.status_code == 204
+
+
+def totals_and_averages(api_client, tank_id: int) -> list[tuple[float, float]]:
+    return [
+        (daily_total_sales, weekly_running_average)
+        for _, _, daily_total_sales, weekly_running_average, _ in get_daily_sales(
+            api_client, tank_id, "2023-01-02", "2023-01-05"
+        )
+    ]
+
+
+def test_patch_correction_updates_day_and_running_averages(api_client):
+    tank_id, tank_volume_ids = load_spec_tank(api_client)
+
+    # Jan 4 18:00: 25 -> 30. Jan 4 = 5 + 10 = 15; Jan 5's 30 -> 35 is an increase, so 0.
+    patch_volume(api_client, tank_id, tank_volume_ids["2023-01-04T18:00:00Z"], 30)
+
+    assert totals_and_averages(api_client, tank_id) == [
+        (20.0, 20.0),
+        (0.0, 10.0),
+        (15.0, 11.67),
+        (0.0, 8.75),
+    ]
+
+
+def test_patch_correction_updates_the_next_day(api_client):
+    tank_id, tank_volume_ids = load_spec_tank(api_client)
+
+    # Jan 4 18:00: 25 -> 40. Jan 4 = 5 + 0 = 5; Jan 5's first sale becomes 40 -> 35 = 5.
+    patch_volume(api_client, tank_id, tank_volume_ids["2023-01-04T18:00:00Z"], 40)
+
+    assert totals_and_averages(api_client, tank_id) == [
+        (20.0, 20.0),
+        (0.0, 10.0),
+        (5.0, 8.33),
+        (5.0, 7.5),
+    ]
+
+
+def test_patch_back_restores_the_spec_table(api_client):
+    tank_id, tank_volume_ids = load_spec_tank(api_client)
+    tank_volume_id = tank_volume_ids["2023-01-04T18:00:00Z"]
+
+    patch_volume(api_client, tank_id, tank_volume_id, 40)
+    patch_volume(api_client, tank_id, tank_volume_id, 25)
+
+    assert totals_and_averages(api_client, tank_id) == [
+        (20.0, 20.0),
+        (0.0, 10.0),
+        (20.0, 13.33),
+        (0.0, 10.0),
+    ]
+
+
+def test_delete_days_only_reading_removes_its_row(api_client):
+    tank_id, tank_volume_ids = load_spec_tank(api_client)
+
+    delete_reading(api_client, tank_id, tank_volume_ids["2023-01-05T11:00:00Z"])
+
+    rows = get_daily_sales(api_client, tank_id, "2023-01-05", "2023-01-05")
+    assert rows == [("2023-01-05", "Thursday", 0.0, 10.0, False)]
+    assert not TankDailySales.objects.filter(tank_id=tank_id, date="2023-01-05").exists()
+
+
+def test_delete_previous_days_readings_applies_gap_rule_to_next_day(api_client):
+    tank_id, tank_volume_ids = load_spec_tank(api_client)
+
+    delete_reading(api_client, tank_id, tank_volume_ids["2023-01-03T09:00:00Z"])
+    # Jan 3 still has 45, so Jan 4 is unchanged: 45 -> 40 + 40 -> 25 = 20.
+    assert totals_and_averages(api_client, tank_id)[2] == (20.0, 13.33)
+
+    delete_reading(api_client, tank_id, tank_volume_ids["2023-01-03T15:00:00Z"])
+    # No Jan 3 readings: Jan 4's first sale is 0 (gap rule), so Jan 4 = 15.
+    assert totals_and_averages(api_client, tank_id) == [
+        (20.0, 20.0),
+        (0.0, 10.0),
+        (15.0, 11.67),
+        (0.0, 8.75),
+    ]
+
+
+def test_rejected_corrections_leave_totals_unchanged(api_client):
+    tank_id, tank_volume_ids = load_spec_tank(api_client)
+    tank_volume_id = tank_volume_ids["2023-01-04T18:00:00Z"]
+
+    created_at_change = api_client.patch(
+        f"/api/v1/tanks/{tank_id}/volumes/{tank_volume_id}/",
+        {"volume": 1, "created_at": "2023-01-04T18:00:00Z"},
+        format="json",
+    )
+    wrong_tank = api_client.delete(f"/api/v1/tanks/999/volumes/{tank_volume_id}/")
+
+    assert (created_at_change.status_code, wrong_tank.status_code) == (400, 404)
+    assert totals_and_averages(api_client, tank_id) == [
+        (20.0, 20.0),
+        (0.0, 10.0),
+        (20.0, 13.33),
+        (0.0, 10.0),
+    ]

@@ -241,7 +241,8 @@ paths:
       description: A JSON array of 1 to 1000 readings, saved all or nothing. created_at
         is optional (defaults to now), but at most one reading per batch may omit
         it, and timestamps must be unique within the batch and for the tank. Timestamps
-        without an offset are treated as UTC.
+        without an offset are treated as UTC. Daily sales for each reading's day and
+        the next day are recalculated before the response returns.
       summary: Add readings (batch)
       parameters:
       - in: path
@@ -298,7 +299,8 @@ paths:
     patch:
       operationId: update_tank_volume
       description: Only volume can change. To fix a wrong created_at, delete the reading
-        and create it again.
+        and create it again. Daily sales for the reading's day and the next day are
+        recalculated before the response returns.
       summary: Correct a reading's volume
       parameters:
       - in: path
@@ -347,7 +349,8 @@ paths:
             under this tank.
     delete:
       operationId: delete_tank_volume
-      description: /tanks/{tank_id}/volumes/{tank_volume_id}/
+      description: Daily sales for the reading's day and the next day are recalculated
+        before the response returns.
       summary: Delete a reading
       parameters:
       - in: path

@@ -271,3 +271,116 @@ class TestDeleteTankVolume:
         with pytest.raises(TankVolumeNotFound):
             tank_volume_service.delete_tank_volume(tank_id=1, tank_volume_id=57)
         mock_tank_volume_repository.delete.assert_not_called()
+
+
+# unsaved_tank_volume.created_at is 2023-01-02T10:00Z, so the affected days are Jan 2 and Jan 3.
+JAN_2_AND_3 = {date(2023, 1, 2), date(2023, 1, 3)}
+
+
+def run_operation(tank_volume_service, operation: str) -> None:
+    if operation == "update":
+        tank_volume_service.update_tank_volume(tank_id=1, tank_volume_id=57, volume=Decimal("12.50"))
+    else:
+        tank_volume_service.delete_tank_volume(tank_id=1, tank_volume_id=57)
+
+
+@pytest.mark.parametrize("operation", ["update", "delete"])
+class TestCorrectionsRecalculateDailySales:
+    """Part 3: PATCH and DELETE refresh the affected daily totals in the same transaction."""
+
+    def test_recalculates_reading_day_and_next_day_inside_transaction(
+        self,
+        tank_volume_service,
+        mock_tank_volume_repository,
+        mock_daily_sales_service,
+        recording_atomic,
+        unsaved_tank,
+        unsaved_tank_volume,
+        operation,
+    ):
+        mock_tank_volume_repository.get_for_tank.return_value = unsaved_tank_volume
+        mock_tank_volume_repository.update_volume.return_value = unsaved_tank_volume
+        recalculated_inside_transaction = []
+        mock_daily_sales_service.recalculate_days.side_effect = (
+            lambda tank, dates: recalculated_inside_transaction.append(recording_atomic.active)
+        )
+
+        run_operation(tank_volume_service, operation)
+
+        mock_daily_sales_service.recalculate_days.assert_called_once_with(unsaved_tank, JAN_2_AND_3)
+        assert recalculated_inside_transaction == [True]
+
+    def test_affected_days_use_tank_local_date(
+        self,
+        tank_volume_service,
+        mock_tank_volume_repository,
+        mock_daily_sales_service,
+        unsaved_tank,
+        unsaved_tank_volume,
+        operation,
+    ):
+        unsaved_tank.timezone = "America/Chicago"
+        unsaved_tank_volume.created_at = datetime(2023, 1, 3, 2, tzinfo=UTC)  # Jan 2 in Chicago
+        mock_tank_volume_repository.get_for_tank.return_value = unsaved_tank_volume
+        mock_tank_volume_repository.update_volume.return_value = unsaved_tank_volume
+
+        run_operation(tank_volume_service, operation)
+
+        mock_daily_sales_service.recalculate_days.assert_called_once_with(unsaved_tank, JAN_2_AND_3)
+
+    def test_no_recalculation_when_reading_not_found(
+        self, tank_volume_service, mock_tank_volume_repository, mock_daily_sales_service, operation
+    ):
+        mock_tank_volume_repository.get_for_tank.return_value = None
+
+        with pytest.raises(TankVolumeNotFound):
+            run_operation(tank_volume_service, operation)
+        mock_daily_sales_service.recalculate_days.assert_not_called()
+
+    def test_no_recalculation_when_tank_not_found(
+        self,
+        tank_volume_service,
+        mock_tank_repository,
+        mock_daily_sales_service,
+        operation,
+    ):
+        mock_tank_repository.get_by_id.return_value = None
+
+        with pytest.raises(TankNotFound):
+            run_operation(tank_volume_service, operation)
+        mock_daily_sales_service.recalculate_days.assert_not_called()
+
+    def test_no_recalculation_when_write_fails(
+        self,
+        tank_volume_service,
+        mock_tank_volume_repository,
+        mock_daily_sales_service,
+        unsaved_tank_volume,
+        operation,
+    ):
+        mock_tank_volume_repository.get_for_tank.return_value = unsaved_tank_volume
+        mock_tank_volume_repository.update_volume.side_effect = RuntimeError("db down")
+        mock_tank_volume_repository.delete.side_effect = RuntimeError("db down")
+
+        with pytest.raises(RuntimeError):
+            run_operation(tank_volume_service, operation)
+        mock_daily_sales_service.recalculate_days.assert_not_called()
+
+
+def test_delete_uses_timestamp_captured_before_deleting(
+    tank_volume_service,
+    mock_tank_volume_repository,
+    mock_daily_sales_service,
+    unsaved_tank,
+    unsaved_tank_volume,
+):
+    mock_tank_volume_repository.get_for_tank.return_value = unsaved_tank_volume
+
+    def delete_and_clear(tank_volume):
+        tank_volume.created_at = None  # the row (and its timestamp) is gone after delete
+
+    mock_tank_volume_repository.delete.side_effect = delete_and_clear
+
+    tank_volume_service.delete_tank_volume(tank_id=1, tank_volume_id=57)
+
+    mock_daily_sales_service.recalculate_days.assert_called_once_with(unsaved_tank, JAN_2_AND_3)

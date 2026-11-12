@@ -13,15 +13,17 @@ Built for the DashFuel backend take-home.
 
 ### Technical decisions and tradeoffs
 
-- **API → service → repository layers:** business rules live in services and pure functions, so they're unit tested without a database. It's more structure than typical Django.
+- **API → service → repository layers:** business rules live in services and pure functions, so they're unit tested without a database.
 - **Simple queries, logic in Python:** easy to test and reason about; at scale the pairwise calculation would move into SQL (`LAG()`).
-- **Daily totals stored, recalculated on write:** new readings recalculate their day and the next day in the same transaction, so a missing row always means "no readings".
+- **Daily totals stored, recalculated on write:** POST, PATCH, and DELETE on readings recalculate the reading's day and the next day in the same transaction, so a missing row always means "no readings".
 - **Running average calculated on read:** from at most 7 stored totals, so it's never stale and corrections don't need to propagate through the week.
 - **Direct service calls, not events:** simple and transactional; at scale this would be an event system that populates a queue.
+- **Concurrency:** SQLite serializes writes; on Postgres, lock the tank row (`select_for_update`) so concurrent recalculations can't overwrite each other.
+- **Admin can't edit readings or a tank's timezone:** those must go through the API so daily totals are recalculated.
 - **Days use the tank's timezone:** changing a tank's timezone rebuilds its daily totals.
 - **PATCH corrects volume only:** a wrong timestamp is delete + re-create, so a correction never moves a reading to another day.
 - **`Decimal`, not float,** for volumes and sales.
-- **No Docker or Make:** not needed to run a SQLite app with a venv.
+- **No Docker or Make:** not needed to run a SQLite app with a venv in a technical eval project.
 
 ## Getting started
 
@@ -29,14 +31,20 @@ Requires Python 3.12+ (Django 6.1).
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate        # macOS / Linux
-.venv\Scripts\Activate.ps1       # Windows PowerShell
+
+# Activate the virtual env per machine type
+# macOS / Linux
+source .venv/bin/activate
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
 
 pip install -r requirements.txt
 python manage.py migrate           # creates a fresh local SQLite DB
 python manage.py createsuperuser   # optional, for the admin
 python manage.py runserver
 ```
+
+## Helpful URLs
 
 | URL | What |
 |---|---|
@@ -114,3 +122,20 @@ Matches the spec:
 - Dates are inclusive, max 30 days.
 - Filter with `&tank_id=1&tank_id=2`; omit for all tanks.
 - To rebuild totals for readings loaded outside the API: `POST /api/v1/tanks/sales/daily/recalculate/` with `{"start_date": "...", "end_date": "..."}`.
+
+### 5. Correct a reading
+
+Change Jan 4 18:00 (`tank_volume_id` 6 on a fresh DB) from 25 to 40:
+
+```bash
+curl -X PATCH http://127.0.0.1:8000/api/v1/tanks/1/volumes/6/ \
+  -H "Content-Type: application/json" \
+  -d '{"volume": 40}'
+```
+
+Re-run step 4. Jan 4 and the next day both change:
+
+| Date | Daily total | Running average |
+|---|---|---|
+| 2023-01-04 | 5.0 | 8.33 |
+| 2023-01-05 | 5.0 | 7.5 |

@@ -160,7 +160,8 @@ class TankVolumeCollectionView(APIView):
             f"A JSON array of 1 to {MAX_TANK_VOLUME_BATCH_SIZE} readings, saved all or nothing. "
             "created_at is optional (defaults to now), but at most one reading per batch may "
             "omit it, and timestamps must be unique within the batch and for the tank. "
-            "Timestamps without an offset are treated as UTC."
+            "Timestamps without an offset are treated as UTC. Daily sales for each reading's day "
+            "and the next day are recalculated before the response returns."
         ),
         tags=[TANK_VOLUMES_TAG],
         request=TankVolumeCreateRequestSerializer(many=True),
@@ -191,7 +192,8 @@ class TankVolumeItemView(APIView):
         summary="Correct a reading's volume",
         description=(
             "Only volume can change. To fix a wrong created_at, delete the reading and create "
-            "it again."
+            "it again. Daily sales for the reading's day and the next day are recalculated "
+            "before the response returns."
         ),
         tags=[TANK_VOLUMES_TAG],
         request=TankVolumeUpdateRequestSerializer,
@@ -214,6 +216,10 @@ class TankVolumeItemView(APIView):
     @extend_schema(
         operation_id="delete_tank_volume",
         summary="Delete a reading",
+        description=(
+            "Daily sales for the reading's day and the next day are recalculated before the "
+            "response returns."
+        ),
         tags=[TANK_VOLUMES_TAG],
         responses={204: None, 404: TANK_OR_TANK_VOLUME_NOT_FOUND},
     )

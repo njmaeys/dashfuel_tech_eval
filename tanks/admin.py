@@ -9,12 +9,28 @@ class TankAdmin(admin.ModelAdmin):
     list_filter = ("deleted_at",)
     search_fields = ("name", "location")
 
+    def get_readonly_fields(self, request, obj=None) -> tuple[str, ...]:
+        # Changing timezone moves every day boundary, so the API's PATCH rebuilds the tank's
+        # daily sales. The admin would skip that, so timezone is only editable on creation.
+        return ("timezone",) if obj is not None else ()
+
 
 @admin.register(TankVolume)
 class TankVolumeAdmin(admin.ModelAdmin):
+    """View only: reading changes go through the API so daily sales stay in sync."""
+
     list_display = ("id", "tank", "volume", "created_at", "updated_at")
     list_filter = ("tank",)
     date_hierarchy = "created_at"
+
+    def has_add_permission(self, request) -> bool:
+        return False
+
+    def has_change_permission(self, request, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request, obj=None) -> bool:
+        return False
 
 
 @admin.register(TankDailySales)
